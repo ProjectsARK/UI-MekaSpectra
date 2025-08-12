@@ -35,13 +35,11 @@ class _EditConfigPageState extends State<EditConfigPage> {
 
   Future<void> _fetchConfig() async {
     try {
-      final response = await http.get(Uri.parse("http://192.168.4.1/config")).timeout(const Duration(seconds: 3));
+      final response = await http.get(Uri.parse("http://192.168.4.1/configs")).timeout(const Duration(seconds: 3)); // Get
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-
         setState(() {
           isConnected = true;
-
           // Ambil whiteReference dan darkReference dari response
           whiteReference = List<double>.from(data['white_reference'] ?? List.filled(19, 0));
           darkReference = List<double>.from(data['dark_reference'] ?? List.filled(19, 0));
@@ -86,7 +84,7 @@ class _EditConfigPageState extends State<EditConfigPage> {
     };
 
     try {
-      final response = await http.post(
+      final response = await http.post( 
         Uri.parse("http://192.168.4.1/config"),
         headers: {"Content-Type": "application/json"},
         body: json.encode(body),
