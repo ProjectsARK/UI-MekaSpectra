@@ -82,11 +82,11 @@ class HomePage extends StatelessWidget {
                 children: [
                   Image.asset(
                     'assets/images/LogoUB.jpg',
-                    height: 60,
+                    height: 100,
                   ),
                   Image.asset(
                     'assets/images/LogoIFRI.jpg',
-                    height: 60,
+                    height: 100,
                   ),
                 ],
               ),
@@ -109,11 +109,10 @@ class _MenuButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 250,
-      child: OutlinedButton(
+      child: ElevatedButton(
         onPressed: onPressed,
         child: Text(
-          text,
-          style: Theme.of(context).textTheme.labelLarge,
+          text
         ),
       ),
     );

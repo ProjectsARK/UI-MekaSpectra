@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 class EditConfigPage extends StatefulWidget {
@@ -11,176 +12,154 @@ class EditConfigPage extends StatefulWidget {
 }
 
 class _EditConfigPageState extends State<EditConfigPage> {
+  final _formKey = GlobalKey<FormState>();
   bool isConnected = false;
-  Timer? _timer;
-
-  // Nilai white & dark reference (read-only)
-  List<double> whiteReference = List.filled(19, 0);
-  List<double> darkReference = List.filled(19, 0);
-
-  // Controller untuk 2 input setting di bawah
-  final TextEditingController averagingController = TextEditingController();
-  final TextEditingController integrationTimeController = TextEditingController();
-
   bool isSaving = false;
 
+  Timer? _timer;
+
+  // Data dari device
+  List<double> whiteReference = List.filled(19, 0);
+  List<double> darkReference  = List.filled(19, 0);
+
+  // Controller form
+  final averagingController        = TextEditingController();
+  final integrationTimeController  = TextEditingController();
+
+  static const _baseUrl = "http://192.168.4.1";
+
   @override
-  void initState() {
-    super.initState();
-    _fetchConfig();
-    _timer = Timer.periodic(const Duration(seconds: 3), (timer) {
-      _fetchConfig();
-    });
-  }
+void initState() {
+  super.initState();
+  _fetchConfigs();
+  // polling ringan agar status & nilai update berkala
+  _timer = Timer.periodic(const Duration(seconds: 5), (t) async {
+    if (!mounted) {
+      t.cancel();                 // pastikan berhenti saat halaman ditutup
+      return;
+    }
+    await _fetchConfigs();
+  });
+}
 
-  Future<void> _fetchConfig() async {
-    try {
-      final response = await http.get(Uri.parse("http://192.168.4.1/config")).timeout(const Duration(seconds: 3));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+@override
+void dispose() {
+  _timer?.cancel();
+  averagingController.dispose();
+  integrationTimeController.dispose();
+  super.dispose();
+}
 
-        setState(() {
-          isConnected = true;
+Future<void> _fetchConfigs() async {
+  try {
+    final res = await http
+        .get(Uri.parse("$_baseUrl/configs"))
+        .timeout(const Duration(seconds: 3));
 
-          // Ambil whiteReference dan darkReference dari response
-          whiteReference = List<double>.from(data['white_reference'] ?? List.filled(19, 0));
-          darkReference = List<double>.from(data['dark_reference'] ?? List.filled(19, 0));
+    if (!mounted) return;         // guard setelah await
 
-          averagingController.text = data['averaging']?.toString() ?? '';
-          integrationTimeController.text = data['integration_time']?.toString() ?? '';
-        });
-      } else {
-        _setDisconnected();
-      }
-    } catch (e) {
+    if (res.statusCode == 200) {
+      final data = json.decode(res.body);
+
+      if (!mounted) return;       // guard sebelum setState & controller
+      setState(() {
+        isConnected = true;
+
+        averagingController.text = (data['avg'] ?? '').toString();
+        integrationTimeController.text = (data['ic'] ?? '').toString();
+
+        whiteReference = (data['wr'] as List? ?? const [])
+            .map((e) => (e as num).toDouble())
+            .toList()
+            .padRight(19, 0.0)
+            .take(19)
+            .toList();
+
+        darkReference = (data['dr'] as List? ?? const [])
+            .map((e) => (e as num).toDouble())
+            .toList()
+            .padRight(19, 0.0)
+            .take(19)
+            .toList();
+      });
+    } else {
       _setDisconnected();
     }
+  } catch (_) {
+    _setDisconnected();
   }
+}
 
-  void _setDisconnected() {
-    setState(() {
-      isConnected = false;
-      whiteReference = List.filled(19, 0);
-      darkReference = List.filled(19, 0);
-      averagingController.text = '';
-      integrationTimeController.text = '';
-    });
-  }
+void _setDisconnected() {
+  if (!mounted) return;           // jangan setState jika sudah dispose
+  setState(() {
+    isConnected = false;
+    whiteReference = List.filled(19, 0);
+    darkReference  = List.filled(19, 0);
+    // biarkan nilai form apa adanya agar user bisa menulis lalu save saat tersambung lagi
+  });
+}
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    averagingController.dispose();
-    integrationTimeController.dispose();
-    super.dispose();
-  }
+Future<void> _saveConfigs() async {
+  if (!_formKey.currentState!.validate()) return;
 
-  Future<void> _saveConfig() async {
-    setState(() {
-      isSaving = true;
-    });
+  if (mounted) setState(() => isSaving = true);
 
-    final body = {
-      "averaging": int.tryParse(averagingController.text) ?? 0,
-      "integration_time": int.tryParse(integrationTimeController.text) ?? 0,
-    };
+  try {
+    final res = await http
+        .post(
+          Uri.parse("$_baseUrl/configs"),
+          body: {
+            "avg": averagingController.text,
+            "ic" : integrationTimeController.text,
+          },
+        )
+        .timeout(const Duration(seconds: 5));
 
-    try {
-      final response = await http.post(
-        Uri.parse("http://192.168.4.1/config"),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode(body),
-      ).timeout(const Duration(seconds: 5));
+    if (!mounted) return;
 
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Konfigurasi berhasil disimpan")),
-        );
-        _fetchConfig(); // Refresh data
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Gagal menyimpan konfigurasi: ${response.statusCode}")),
-        );
-      }
-    } catch (e) {
+    if (res.statusCode == 200) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error saat menyimpan konfigurasi: $e")),
+        const SnackBar(content: Text("Konfigurasi berhasil disimpan")),
+      );
+      await _fetchConfigs();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Gagal menyimpan: ${res.statusCode}")),
       );
     }
-
-    setState(() {
-      isSaving = false;
-    });
-  }
-
-  Widget _buildReferenceColumn(String label, List<double> values) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade400),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              children: values
-                  .map((v) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Text(v.toStringAsFixed(3)),
-                      ))
-                  .toList(),
-            ),
-          ),
-        ],
-      ),
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Error saat menyimpan: $e")),
     );
+  } finally {
+    if (mounted) setState(() => isSaving = false);
   }
-
-  Widget _buildWavelengthTable(List<double> whiteRef, List<double> darkRef) {
-    // Tabel 2 baris x 19 kolom, baris 1 = whiteRef, baris 2 = darkRef
-    final columns = List.generate(19, (index) => (index + 1).toString());
-
-    return Expanded(
-      flex: 3,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          columns: [
-            const DataColumn(label: Text('Wavelength')),
-            ...columns.map((c) => DataColumn(label: Text(c))),
-          ],
-          rows: [
-            DataRow(cells: [
-              const DataCell(Text('White Ref')),
-              ...whiteRef.map((v) => DataCell(Text(v.toStringAsFixed(3)))).toList(),
-            ]),
-            DataRow(cells: [
-              const DataCell(Text('Dark Ref')),
-              ...darkRef.map((v) => DataCell(Text(v.toStringAsFixed(3)))).toList(),
-            ]),
-          ],
-        ),
-      ),
-    );
-  }
+}
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Configuration"),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context), // kembali ke home
+          onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            tooltip: "Refresh",
+            onPressed: _fetchConfigs,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
           children: [
             // Status koneksi
             Row(
@@ -193,50 +172,128 @@ class _EditConfigPageState extends State<EditConfigPage> {
                 Text(isConnected ? "Terkoneksi" : "Tidak terkoneksi"),
               ],
             ),
-            const SizedBox(height: 20),
 
-            // Baris atas: White Reference dan Dark Reference + Tabel 2x19
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildReferenceColumn("White Reference", whiteReference),
-                const SizedBox(width: 16),
-                _buildReferenceColumn("Dark Reference", darkReference),
-                const SizedBox(width: 16),
-                _buildWavelengthTable(whiteReference, darkReference),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // Input Averaging dan Integration Time
-            TextFormField(
-              controller: averagingController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: "Averaging"),
-            ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: integrationTimeController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: "Integration Time"),
+
+            // Ringkasan reference (tabel 3 kolom yang ringkas untuk mobile)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Reference Preview",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 320,
+                      child: SingleChildScrollView(
+                        child: DataTable(
+                          columns: const [
+                            DataColumn(label: Text('Ch')),
+                            DataColumn(label: Text('White')),
+                            DataColumn(label: Text('Dark')),
+                          ],
+                          rows: List.generate(19, (i) {
+                            final w = (i < whiteReference.length)
+                                ? whiteReference[i]
+                                : 0.0;
+                            final d = (i < darkReference.length)
+                                ? darkReference[i]
+                                : 0.0;
+                            return DataRow(cells: [
+                              DataCell(Text('${i + 1}')),
+                              DataCell(Text(w.toStringAsFixed(3))),
+                              DataCell(Text(d.toStringAsFixed(3))),
+                            ]);
+                          }),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
 
-            const SizedBox(height: 30),
+            const SizedBox(height: 16),
 
-            // Tombol Save
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton(
-                onPressed: isSaving ? null : _saveConfig,
-                child: isSaving
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text("Save"),
+            // Form pengaturan
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Acquisition Settings",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Averaging
+                      TextFormField(
+                        controller: averagingController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: false, signed: false),
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: const InputDecoration(
+                          labelText: "Averaging",
+                          border: OutlineInputBorder(),
+                        ),
+                        // validator tetap seperti sebelumnya...
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      TextFormField(
+                        controller: integrationTimeController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: false, signed: false),
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: const InputDecoration(
+                          labelText: "Integration Time (ms)",
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Tombol Save
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: isSaving ? null : _saveConfigs,
+                          child: isSaving
+                              ? const CircularProgressIndicator()
+                              : const Text("Save"),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
+            ),
+
+            const SizedBox(height: 8),
+            // Info kecil
+            Text(
+              "Catatan: nilai pada tabel di atas adalah pratinjau white/dark reference dari perangkat.",
+              style: TextStyle(color: cs.onSurfaceVariant),
             ),
           ],
         ),
       ),
     );
+  }
+}
+
+// --- util extension kecil untuk mempermudah padRight list ---
+extension _PadRight<T> on List<T> {
+  List<T> padRight(int length, T fill) {
+    if (this.length >= length) return this;
+    return [...this, ...List.filled(length - this.length, fill)];
   }
 }

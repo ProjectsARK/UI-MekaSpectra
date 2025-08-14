@@ -7,6 +7,10 @@ class AppTheme {
     colorScheme: ColorScheme.fromSeed(
       seedColor: AppColors.primary,
       primary: AppColors.primary,
+      surface: Colors.white,
+    ),
+    cardTheme: const CardThemeData(
+      color: Colors.white,
     ),
     textTheme: const TextTheme(
       headlineLarge: TextStyle(
@@ -19,17 +23,14 @@ class AppTheme {
         color: AppColors.primary,
       ),
     ),
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.primary,
-        side: const BorderSide(color: AppColors.buttonBorder, width: 1.5),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.primary, // warna solid tombol
+        foregroundColor: Colors.white, // warna teks & ikon
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(50), // Rounded-pill
+          borderRadius: BorderRadius.circular(12), // sudut membulat
         ),
-        padding: const EdgeInsets.symmetric(
-          vertical: AppPaddings.buttonVertical,
-          horizontal: AppPaddings.buttonHorizontal,
-        ),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       ),
     ),
   );
