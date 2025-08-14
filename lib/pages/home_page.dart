@@ -32,7 +32,7 @@ class HomePage extends StatelessWidget {
                     'MekaSpectra',
                     style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                           fontWeight: FontWeight.bold,
-                          fontSize: 28, // langsung angka biar nggak perlu AppTextSizes
+                          fontSize: 48, // langsung angka biar nggak perlu AppTextSizes
                         ),
                   ),
                 ),
@@ -81,12 +81,16 @@ class HomePage extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   Image.asset(
-                    'assets/images/LogoUB.jpg',
-                    height: 100,
+                    'assets/images/LogoBIOAI.png',
+                    height: 80,
                   ),
                   Image.asset(
-                    'assets/images/LogoIFRI.jpg',
-                    height: 100,
+                    'assets/images/LogoUB.png',
+                    height: 80,
+                  ),
+                  Image.asset(
+                    'assets/images/LogoIFRI.png',
+                    height: 80,
                   ),
                 ],
               ),

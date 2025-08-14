@@ -26,6 +26,14 @@ class _UpdateModelPageState extends State<UpdateModelPage> {
     super.dispose();
   }
 
+  // Pull-to-refresh handler
+  Future<void> _onRefresh() async {
+    // Jika ingin ping device, kamu bisa tambahkan GET ke /info di sini
+    // final res = await _client.get(Uri.parse("$_baseUrl/info")).timeout(const Duration(seconds: 3));
+    if (!mounted) return;
+    setState(() => selectedFile = null); // reset pilihan file
+  }
+
   Future<void> pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -75,7 +83,6 @@ class _UpdateModelPageState extends State<UpdateModelPage> {
           const SnackBar(content: Text("Model uploaded successfully")),
         );
       } else {
-        // Tampilkan sedikit detail error (status + body ringkas)
         final bodySnippet = response.body.length > 200
             ? "${response.body.substring(0, 200)}..."
             : response.body;
@@ -116,87 +123,99 @@ class _UpdateModelPageState extends State<UpdateModelPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            tooltip: "Refresh",
+            onPressed: _onRefresh, // refresh via ikon juga (opsional)
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Card drop area
-          Card(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: _isUploading ? null : pickFile,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: cs.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: cs.outlineVariant),
-                ),
-                height: 200,
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.file_upload, size: 40),
-                      const SizedBox(height: 12),
-                      FutureBuilder<String>(
-                        future: selectedFile == null ? null : _fileInfo(selectedFile!),
-                        builder: (context, snap) {
-                          final text = selectedFile == null
-                              ? "Tap to choose .bin file"
-                              : (snap.data ?? selectedFile!.path.split('/').last);
-                          return Text(
-                            text,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 16),
-                          );
-                        },
-                      ),
-                      if (selectedFile != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          "(Tap to replace file)",
-                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+      // ⬇️ RefreshIndicator agar bisa pull-to-refresh
+      body: RefreshIndicator(
+        onRefresh: _onRefresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(), // tetap bisa ditarik meski konten pendek
+          padding: const EdgeInsets.all(16),
+          children: [
+            // Card drop area
+            Card(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: _isUploading ? null : pickFile,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: cs.outlineVariant),
+                  ),
+                  height: 200,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.file_upload, size: 40),
+                        const SizedBox(height: 12),
+                        FutureBuilder<String>(
+                          future: selectedFile == null ? null : _fileInfo(selectedFile!),
+                          builder: (context, snap) {
+                            final text = selectedFile == null
+                                ? "Tap to choose .bin file"
+                                : (snap.data ?? selectedFile!.path.split('/').last);
+                            return Text(
+                              text,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 16),
+                            );
+                          },
                         ),
+                        if (selectedFile != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            "(Tap to replace file)",
+                            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          const SizedBox(height: 8),
-          Text(
-            "Upload model (.bin) ke sensor melalui koneksi lokal.\nPastikan perangkat stabil dan tidak dimatikan saat proses berlangsung.",
-            style: TextStyle(color: cs.onSurfaceVariant),
-          ),
+            const SizedBox(height: 8),
+            Text(
+              "Upload model (.bin) ke sensor melalui koneksi lokal dengan ukuran model max 1,5 mb.",
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
 
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          // Tombol-tombol
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: (_isUploading || selectedFile == null) ? null : cancelSelection,
-                  child: const Text("Cancel"),
+            // Tombol-tombol
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: (_isUploading || selectedFile == null) ? null : cancelSelection,
+                    child: const Text("Cancel"),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: (_isUploading || selectedFile == null) ? null : uploadModel,
-                  child: _isUploading
-                      ? const SizedBox(
-                          height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text("Upload"),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: (_isUploading || selectedFile == null) ? null : uploadModel,
+                    child: _isUploading
+                        ? const SizedBox(
+                            height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text("Upload"),
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

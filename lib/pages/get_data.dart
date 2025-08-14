@@ -14,11 +14,15 @@ class GetDataPage extends StatefulWidget {
 }
 
 class _GetDataPageState extends State<GetDataPage> {
-  List<List<dynamic>> predictionResults = [];
-  List<List<dynamic>> acquisitionResults = [];
-  bool connected = false;
+  // Prediction
+  List<String> predictionHeader = [];
+  List<List<dynamic>> predictionRows = [];
 
-  Timer? _timer;
+  // Acquisition
+  List<String> acquisitionHeader = [];
+  List<List<dynamic>> acquisitionRows = [];
+
+  bool connected = false;
   bool _isFetching = false; // cegah fetch bertumpuk
 
   static const _baseUrl = "http://192.168.4.1";
@@ -26,21 +30,12 @@ class _GetDataPageState extends State<GetDataPage> {
   @override
   void initState() {
     super.initState();
-    // panggilan awal
+    // Fetch sekali saat halaman dibuka
     fetchData();
-    // polling berkala
-    _timer = Timer.periodic(const Duration(seconds: 5), (t) async {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      await fetchData();
-    });
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
     super.dispose();
   }
 
@@ -66,17 +61,27 @@ class _GetDataPageState extends State<GetDataPage> {
       }
 
       if (resResults.statusCode == 200 && resCaptures.statusCode == 200) {
-        // Parse CSV aman (dibungkus try agar tidak crash bila CSV kosong/invalid)
-        List<List<dynamic>> parsedResults = const [];
-        List<List<dynamic>> parsedCaptures = const [];
-        try {
-          parsedResults =
-              const CsvToListConverter(eol: '\n').convert(resResults.body);
-        } catch (_) {}
-        try {
-          parsedCaptures =
-              const CsvToListConverter(eol: '\n').convert(resCaptures.body);
-        } catch (_) {}
+        // Parse CSV → ambil header dari baris pertama, sisanya rows
+        final parsedResults = _safeParseCsv(resResults.body);
+        final parsedCaptures = _safeParseCsv(resCaptures.body);
+
+        List<String> predHeader = [];
+        List<List<dynamic>> predRows = [];
+        if (parsedResults.isNotEmpty) {
+          predHeader = parsedResults.first.map((e) => e.toString()).toList();
+          predRows = parsedResults.length > 1
+              ? parsedResults.sublist(1)
+              : <List<dynamic>>[];
+        }
+
+        List<String> acqHeader = [];
+        List<List<dynamic>> acqRows = [];
+        if (parsedCaptures.isNotEmpty) {
+          acqHeader = parsedCaptures.first.map((e) => e.toString()).toList();
+          acqRows = parsedCaptures.length > 1
+              ? parsedCaptures.sublist(1)
+              : <List<dynamic>>[];
+        }
 
         if (!mounted) {
           _isFetching = false;
@@ -84,8 +89,10 @@ class _GetDataPageState extends State<GetDataPage> {
         }
         setState(() {
           connected = true;
-          predictionResults = _maybeDropHeader(parsedResults);
-          acquisitionResults = _maybeDropHeader(parsedCaptures);
+          predictionHeader = predHeader;
+          predictionRows = predRows;
+          acquisitionHeader = acqHeader;
+          acquisitionRows = acqRows;
         });
       } else {
         _setDisconnected();
@@ -97,29 +104,32 @@ class _GetDataPageState extends State<GetDataPage> {
     }
   }
 
-  List<List<dynamic>> _maybeDropHeader(List<List<dynamic>> rows) {
-    if (rows.isEmpty) return rows;
-    final f = rows.first.map((e) => e.toString().toLowerCase()).toList();
-    final looksHeader = f.any((s) =>
-        s.contains('date') ||
-        s.contains('result') ||
-        s.contains('wavelength') ||
-        s == 'lt' ||
-        s == 'at');
-    return looksHeader ? rows.skip(1).toList() : rows;
+  List<List<dynamic>> _safeParseCsv(String csv) {
+    try {
+      if (csv.trim().isEmpty) return const [];
+      return const CsvToListConverter(eol: '\n').convert(csv);
+    } catch (_) {
+      return const [];
+    }
   }
 
   void _setDisconnected() {
     if (!mounted) return;
     setState(() {
       connected = false;
-      predictionResults = [];
-      acquisitionResults = [];
+      predictionHeader = [];
+      predictionRows = [];
+      acquisitionHeader = [];
+      acquisitionRows = [];
     });
   }
 
-  Future<void> exportCSV(List<List<dynamic>> data, String fileName) async {
-    if (data.isEmpty) {
+  Future<void> exportCSV({
+    required List<String> header,
+    required List<List<dynamic>> rows,
+    required String fileName,
+  }) async {
+    if (header.isEmpty && rows.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Data kosong, tidak bisa diunduh")),
@@ -128,6 +138,10 @@ class _GetDataPageState extends State<GetDataPage> {
       return;
     }
 
+    final data = <List<dynamic>>[
+      if (header.isNotEmpty) header,
+      ...rows,
+    ];
     final csvData = const ListToCsvConverter().convert(data);
     final directory = await getExternalStorageDirectory();
     final path = "${directory!.path}/$fileName.csv";
@@ -158,7 +172,7 @@ class _GetDataPageState extends State<GetDataPage> {
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Sensor Info'),
-            content: Text('Storage: ${storage.toStringAsFixed(2)} MB'),
+            content: Text('Storage: ${storage.toStringAsFixed(2)} %'),
             actions: [
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
             ],
@@ -202,8 +216,10 @@ class _GetDataPageState extends State<GetDataPage> {
         if (data['formatted'] == true) {
           if (!mounted) return;
           setState(() {
-            predictionResults = [];
-            acquisitionResults = [];
+            predictionHeader = [];
+            predictionRows = [];
+            acquisitionHeader = [];
+            acquisitionRows = [];
           });
           _snack("Semua data berhasil dihapus");
         } else {
@@ -222,20 +238,16 @@ class _GetDataPageState extends State<GetDataPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
-  List<dynamic> _fitRow(List<dynamic> row, int len) {
+  // Pastikan jumlah sel per baris = jumlah kolom header
+  List<dynamic> _fitRowToHeader(List<dynamic> row, int headerLen) {
     final r = List<dynamic>.from(row);
-    if (r.length > len) return r.sublist(0, len);
-    if (r.length < len) r.addAll(List.filled(len - r.length, ''));
+    if (r.length > headerLen) return r.sublist(0, headerLen);
+    if (r.length < headerLen) r.addAll(List.filled(headerLen - r.length, ''));
     return r;
   }
 
   @override
   Widget build(BuildContext context) {
-    // Acquisition: Date, Lt, At, W1..W18
-    final acqColumns = <String>[
-      'Date', 'Lt', 'At', ...List.generate(18, (i) => 'W${i + 1}')
-    ];
-
     return Scaffold(
       appBar: AppBar(
         title: const Text("Get Data"),
@@ -243,9 +255,18 @@ class _GetDataPageState extends State<GetDataPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            tooltip: "Refresh",
+            onPressed: _isFetching ? null : fetchData,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
-      body: SingleChildScrollView(
-        child: Column(
+      body: RefreshIndicator(
+        onRefresh: fetchData, // tarik ke bawah di paling atas untuk refresh
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: [
             // Status koneksi
             Padding(
@@ -282,20 +303,28 @@ class _GetDataPageState extends State<GetDataPage> {
               ),
             ),
 
-            // Prediction Results
+            // Prediction (header dari CSV)
             _buildTableSection(
               title: "Prediction Results",
-              columns: const ['Date', 'Result', 'Lt', 'At'],
-              data: predictionResults,
-              onDownload: () => exportCSV(predictionResults, "prediction_results"),
+              header: predictionHeader,
+              rows: predictionRows,
+              onDownload: () => exportCSV(
+                header: predictionHeader,
+                rows: predictionRows,
+                fileName: "prediction_results",
+              ),
             ),
 
-            // Acquisition Results (W1..W18)
+            // Acquisition (header dari CSV)
             _buildTableSection(
               title: "Acquisition Results",
-              columns: acqColumns,
-              data: acquisitionResults,
-              onDownload: () => exportCSV(acquisitionResults, "acquisition_results"),
+              header: acquisitionHeader,
+              rows: acquisitionRows,
+              onDownload: () => exportCSV(
+                header: acquisitionHeader,
+                rows: acquisitionRows,
+                fileName: "acquisition_results",
+              ),
             ),
           ],
         ),
@@ -305,13 +334,19 @@ class _GetDataPageState extends State<GetDataPage> {
 
   Widget _buildTableSection({
     required String title,
-    required List<String> columns,
-    required List<List<dynamic>> data,
+    required List<String> header,
+    required List<List<dynamic>> rows,
     required VoidCallback onDownload,
   }) {
-    const int minRows = 6;
-    final displayData =
-        data.isEmpty ? List.generate(minRows, (_) => List.filled(columns.length, '')) : data;
+    // ada data kalau rows tidak kosong
+    final bool hasData = rows.isNotEmpty;
+
+    // siapkan kolom (kalau header kosong tetapi ada rows, ambil dari panjang row pertama)
+    final List<String> columns = header.isNotEmpty
+        ? header
+        : (hasData
+            ? List<String>.generate(rows.first.length, (i) => 'Col ${i + 1}')
+            : const <String>[]);
 
     return Padding(
       padding: const EdgeInsets.all(12),
@@ -324,29 +359,45 @@ class _GetDataPageState extends State<GetDataPage> {
             children: [
               Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
-              SizedBox(
-                height: 220,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
+
+              // === Konten: TABEL jika ada data, kalau tidak tampilkan placeholder teks ===
+              if (hasData)
+                SizedBox(
+                  height: 220,
                   child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: columns.map((c) => DataColumn(label: Text(c))).toList(),
-                      rows: displayData.map((row) {
-                        final cells = _fitRow(row, columns.length);
-                        return DataRow(
-                          cells: cells.map((cell) => DataCell(Text(cell.toString()))).toList(),
-                        );
-                      }).toList(),
+                    scrollDirection: Axis.vertical,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: columns.map((c) => DataColumn(label: Text(c))).toList(),
+                        rows: rows.map((row) {
+                          final cells = _fitRowToHeader(row, columns.length);
+                          return DataRow(
+                            cells: cells.map((cell) => DataCell(Text(cell.toString()))).toList(),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                SizedBox(
+                  height: 120,
+                  child: Center(
+                    child: Text(
+                      "Tidak ada data untuk ditampilkan",
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ),
-              ),
+
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
-                  onPressed: onDownload,
+                  onPressed: hasData ? onDownload : null, // nonaktif kalau kosong
                   icon: const Icon(Icons.download),
                   label: const Text('Download CSV'),
                 ),
